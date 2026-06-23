@@ -3,6 +3,8 @@
 #include "module_environment_logic.h"
 #include "module_safety.h"
 #include "module_display.h"
+#include "module_audio.h"
+#include "module_led_breathing.h"
 
 LedMode currentLedMode = IDLE;
 
@@ -17,10 +19,9 @@ namespace {
     
     bool lastModeActive = false;
     bool lastFanActive = false;
-    unsigned long lastLedUpdate = 0;
+    unsigned long lastBootLedUpdate = 0;
     unsigned long lastPotRead = 0;
     int lastHueValue = 0;
-    unsigned long lastBootLedUpdate = 0;
     float filteredHue = 0.0;
     int lastSentHue = -1;
 }
@@ -57,13 +58,13 @@ void updateToggleSwitches() {
         // Светодиод хаотично мерцает пока в STATE_BOOTING
         if (currentMillis - lastBootLedUpdate >= random(50, 100)) {
             lastBootLedUpdate = currentMillis;
-            analogWrite(MODE_LED_PIN, random(0, 2) ? 255 : 0);
+            LedBreathing::setBrightness(random(0, 2) ? 4095 : 0);
         }
         // В BOOT не обрабатываем тумблеры
         return;
     }
     
-    // --- ПЕРЕХО В OPERATIONAL (вызывается функцией экрана) ---
+    // --- ПЕРЕХОД В OPERATIONAL (вызывается функцией экрана) ---
     // Эта часть выполняется когда systemState переключается в STATE_OPERATIONAL
     static bool operationalTransitionHandled = false;
     if (systemState == STATE_OPERATIONAL && !operationalTransitionHandled) {
@@ -143,8 +144,8 @@ void updateToggleSwitches() {
 
         if (newScreen != state.currentScreen) {
             state.currentScreen = newScreen;
-            // Звуковой эффект при переключении экранов (одиночный сочный блип)
-            tone(BUZZER_PIN, 2500, 30);
+            // Звуковой эффект при переключении экранов
+            Audio::playBeepSwitch();
             // Отправляем пакет на сервер только ОДИН раз при переключении
             Serial.print("{\"type\":\"status_update\",\"screen\":");
             Serial.print(state.currentScreen);
@@ -159,35 +160,16 @@ void updateToggleSwitches() {
             // Имитация работы дисковода - хаотичные короткие вспышки
             if (currentMillis - lastBootLedUpdate >= random(50, 100)) {
                 lastBootLedUpdate = currentMillis;
-                ledcWrite(MODE_LED_PIN, random(0, 2) ? 4095 : 0);
+                LedBreathing::setBrightness(random(0, 2) ? 4095 : 0);
             }
             break;
         case IDLE:
-            // В авторежиме — плавное ламповое дыхание (экспоненциальный алгоритм AlexGyver)
-            if (currentMillis - lastLedUpdate >= 20) {
-                lastLedUpdate = currentMillis;
-
-                // Превращаем время в радианы. Чем меньше делитель, тем быстрее дыхание.
-                float val = millis() / 450.0;
-
-                // Формула экспоненциального синуса Гайвера
-                // Она делает подъем яркости нелинейным, а затухание - глубоким
-                float exponentialSine = exp(sin(val));
-
-                // Масштабируем результат под наше 12-битное разрешение ШИМ (0...4095)
-                // Формула: (exponentialSine - 1/e) / (e - 1/e) * 4095
-                int brightness = (exponentialSine - 0.36787944) * 1741.0;
-
-                // Ограничиваем на всякий случай диапазон
-                brightness = constrain(brightness, 0, 4095);
-
-                // Отправляем на пин (в ядре v3 передается MODE_LED_PIN)
-                ledcWrite(MODE_LED_PIN, brightness);
-            }
+            // Дыхание обновляется в основном loop() через LedBreathing::update()
+            // Здесь ничего не делаем - это дает полный контроль модулю
             break;
         case MANUAL:
-            // В ручном режиме горит постоянно
-            ledcWrite(MODE_LED_PIN, 4095);
+            // В ручном режиме горит постоянно на полной яркости
+            LedBreathing::setBrightness(4095);
             break;
     }
 
@@ -208,8 +190,8 @@ void updateToggleSwitches() {
         if (modeChanged) {
             currentLedMode = IDLE; // Возвращаем светодиод в режим IDLE
             updateEnvironmentLogic(); // Возвращаем управление автоматике
-            // Звуковой эффект при возврате в автоматический режим (одиночный клик возврата)
-            tone(BUZZER_PIN, 2800, 25);
+            // Звуковой эффект при возврате в автоматический режим
+            Audio::playBeepAutoMode();
             Serial.print("{\"type\":\"status_update\",\"manual_mode\":false,\"relay_on\":");
             Serial.print(digitalRead(RELAY_PIN) == HIGH ? "true" : "false");
             Serial.println("}");
@@ -220,11 +202,9 @@ void updateToggleSwitches() {
             state.manualRelayOn = isFanActive;
             setRelayOutput(isFanActive); // Включаем/выключаем силовой моторчик окна
 
-            // Звуковой эффект при активации ручного режима (двойной плотный клик)
+            // Звуковой эффект при активации ручного режима
             if (modeChanged) {
-                tone(BUZZER_PIN, 2500, 20);
-                delay(40);
-                tone(BUZZER_PIN, 2500, 20);
+                Audio::playBeepManualMode();
             }
 
             Serial.print("{\"type\":\"status_update\",\"manual_mode\":true,\"relay_on\":");
