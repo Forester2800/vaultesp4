@@ -13,6 +13,8 @@
 #include "module_time_sync.h"
 #include "module_ui_helpers.h"
 #include "module_palette.h"
+#include "module_audio.h"
+#include "module_led_breathing.h"
 #include <TFT_eSPI.h>
 #include <time.h>
 
@@ -37,18 +39,8 @@ void setup() {
     // Настройка ШИМ для светодиода режима (GPIO 2) - ESP32 Core V3 API
     ledcAttach(MODE_LED_PIN, MODE_LED_PWM_FREQ, MODE_LED_PWM_BITS);
 
-    // ЭФФЕКТ: ГУЛ ТРАНСФОРМАТОРА (Играет 1 раз при старте)
-    tone(BUZZER_PIN, 120); delay(8);
-    noTone(BUZZER_PIN);   delay(15);
-    tone(BUZZER_PIN, 90);  delay(12);
-    noTone(BUZZER_PIN);   delay(100);
-
-    for (int freq = 100; freq < 320; freq += 3) {
-        tone(BUZZER_PIN, freq);
-        delay(6);
-    }
-    tone(BUZZER_PIN, 320); delay(150);
-    noTone(BUZZER_PIN);
+    // ЭФФЕКТ: ГУЛ ТРАНСФОРМАТОРА (Plays 1 time at startup)
+    Audio::playBootSound();
 
     // МГНОВЕННЫЙ ОПРОС ЦВЕТА ПРИ СТАРТЕ (до инициализации модулей)
     pinMode(33, INPUT); // Потенциометр палитры
@@ -110,6 +102,9 @@ void loop() {
     maintainTimeSync();
 
     unsigned long now = millis();
+
+    // Обновление LED дыхания (не блокирующее)
+    LedBreathing::update(now, currentLedMode);
 
     // Обновление сенсоров и логики с заданной периодичностью
     if (now - lastSensorUpdateMs >= SENSOR_UPDATE_MS) {
